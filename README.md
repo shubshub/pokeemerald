@@ -10,6 +10,8 @@ The rotation happens at render time and is switched by `ROTATE_OVERWORLD_180` in
 
 Build it as described in [INSTALL.md](INSTALL.md). With the rotation on, `pokeemerald.gba` no longer matches the original's sha1; with it commented out, `make compare` still passes.
 
+Every push to master is also built by the [Build ROM](.github/workflows/build.yml) GitHub Actions workflow: open the run in the Actions tab and download the `emerald-180` artifact, which contains `emerald-180.gba`.
+
 Not rotated (yet): the region map, Fly map and PokéNav map; placing secret base decorations; the map shown behind the Poké Mart buy menu; battle transition effects; and the Deoxys rock and Mirage Tower cutscene effects.
 
 ---

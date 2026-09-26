@@ -1,70 +1,53 @@
-name: CI
+name: Build ROM
 
 on:
   push:
     branches: [ master ]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    env:
-      GAME_VERSION: EMERALD
-      GAME_REVISION: 0
-      GAME_LANGUAGE: ENGLISH
-      MODERN: 0
-      COMPARE: 1
     steps:
       - name: Checkout
-        uses: actions/checkout@master
-
-      - name: Checkout syms
-        if: ${{ github.event_name == 'push' }}
-        uses: actions/checkout@master
-        with:
-          path: symbols
-          ref: symbols
+        uses: actions/checkout@v4
 
       - name: Checkout agbcc
-        uses: actions/checkout@master
+        uses: actions/checkout@v4
         with:
-          path: agbcc
           repository: pret/agbcc
+          path: agbcc
 
-      - name: Install binutils
+      - name: Install dependencies
+        # build-essential and git are already installed on the runner
         run: |
-          sudo apt update
-          sudo apt install gcc-arm-none-eabi binutils-arm-none-eabi libpng-dev
-        # build-essential and git are already installed
-        # gcc-arm-none-eabi is only needed for the modern build
-        # as an alternative to dkP
+          sudo apt-get update
+          sudo apt-get install -y binutils-arm-none-eabi libpng-dev
 
-      - name: Install agbcc
+      - name: Build agbcc
+        working-directory: agbcc
         run: |
           ./build.sh
           ./install.sh ../
-        working-directory: agbcc
 
-      - name: Compare
-        run: make -j${nproc} all syms
-
-      - name: Modern
-        env:
-          MODERN: 1
-          COMPARE: 0
-        run: make -j${nproc} all
-
-      - name: Move symfiles
-        if: ${{ github.event_name == 'push' }}
+      - name: Build the rotated ROM
         run: |
-          cp -v *.sym symbols/
-          echo "SYMBOLS_COMMIT_MSG=$( git log --format=%s ${GITHUB_SHA} )" >> $GITHUB_ENV
+          make -j$(nproc)
+          cp pokeemerald.gba emerald-180.gba
+          sha1sum emerald-180.gba
 
-      - name: Update symfiles
-        if: ${{ github.event_name == 'push' }}
-        uses: EndBug/add-and-commit@v7
+      - name: Upload the ROM
+        uses: actions/upload-artifact@v4
         with:
-          branch: symbols
-          cwd: "./symbols"
-          add: "*.sym"
-          message: ${{ env.SYMBOLS_COMMIT_MSG }}
+          name: emerald-180
+          path: emerald-180.gba
+          if-no-files-found: error
+          retention-days: 30
+
+      # Turning the rotation off must still give the original game, byte for byte
+      - name: Check the original ROM still matches
+        run: |
+          sed -i 's|^#define ROTATE_OVERWORLD_180$|//#define ROTATE_OVERWORLD_180|' include/config.h
+          grep -q '^//#define ROTATE_OVERWORLD_180$' include/config.h
+          make -j$(nproc) compare
