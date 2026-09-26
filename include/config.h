@@ -47,6 +47,11 @@
 // Uncomment to fix some identified minor bugs
 //#define BUGFIX
 
+// Rotates the overworld 180 degrees: the map, the sprites on it, and the D-pad
+// (so "up" still moves up the screen). Game logic, maps and scripts are untouched.
+// Comment out to build the original game.
+#define ROTATE_OVERWORLD_180
+
 // Various undefined behavior bugs may or may not prevent compilation with
 // newer compilers. So always fix them when using a modern compiler.
 #if MODERN || defined(BUGFIX)
