@@ -185,10 +185,49 @@ static void InitMainCallbacks(void)
     gPokemonStoragePtr = &gPokemonStorage.block;
 }
 
+#ifdef ROTATE_OVERWORLD_180
+// The overworld is drawn rotated 180 degrees, so the D-pad is rotated too for moving the player:
+// pressing Up moves the player up the screen, which is south on the map.
+static u16 RotateDpad180(u16 keys)
+{
+    u16 rotatedKeys = keys & ~DPAD_ANY;
+
+    if (keys & DPAD_UP)
+        rotatedKeys |= DPAD_DOWN;
+    if (keys & DPAD_DOWN)
+        rotatedKeys |= DPAD_UP;
+    if (keys & DPAD_LEFT)
+        rotatedKeys |= DPAD_RIGHT;
+    if (keys & DPAD_RIGHT)
+        rotatedKeys |= DPAD_LEFT;
+    return rotatedKeys;
+}
+#endif
+
 static void CallCallbacks(void)
 {
+#ifdef ROTATE_OVERWORLD_180
+    if (gMain.callback1 == CB1_Overworld || IsOverworldLinkActive())
+    {
+        // Only the player's movement (callback1, also used by the cable club's link rooms) gets the
+        // rotated D-pad. Menus and scripts read the keys in callback2, so they stay unrotated.
+        u16 newKeys = gMain.newKeys;
+        u16 heldKeys = gMain.heldKeys;
+
+        gMain.newKeys = RotateDpad180(newKeys);
+        gMain.heldKeys = RotateDpad180(heldKeys);
+        gMain.callback1();
+        gMain.newKeys = newKeys;
+        gMain.heldKeys = heldKeys;
+    }
+    else if (gMain.callback1)
+    {
+        gMain.callback1();
+    }
+#else
     if (gMain.callback1)
         gMain.callback1();
+#endif
 
     if (gMain.callback2)
         gMain.callback2();

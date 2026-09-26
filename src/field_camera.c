@@ -14,6 +14,13 @@
 
 EWRAM_DATA bool8 gUnusedBikeCameraAheadPanback = FALSE;
 
+#ifdef ROTATE_OVERWORLD_180
+// Tilemap entry bits that flip a tile horizontally and vertically, i.e. rotate it 180 degrees
+#define TILE_FLIP_180 0x0C00
+#else
+#define TILE_FLIP_180 0
+#endif
+
 struct FieldCameraOffset
 {
     u8 xPixelOffset;
@@ -76,6 +83,12 @@ void FieldUpdateBgTilemapScroll(void)
     u32 r4, r5;
     r5 = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan;
     r4 = sVerticalCameraPan + sFieldCameraOffset.yPixelOffset + 8;
+#ifdef ROTATE_OVERWORLD_180
+    // The map layers are drawn rotated in their 256x256 tilemaps (see DrawMetatile),
+    // so mirror the scroll too to keep the same part of the map on screen.
+    r5 = (256 - DISPLAY_WIDTH) - r5;
+    r4 = (256 - DISPLAY_HEIGHT) - r4;
+#endif
 
     SetGpuReg(REG_OFFSET_BG1HOFS, r5);
     SetGpuReg(REG_OFFSET_BG1VOFS, r4);
@@ -89,6 +102,11 @@ void GetCameraOffsetWithPan(s16 *x, s16 *y)
 {
     *x = sFieldCameraOffset.xPixelOffset + sHorizontalCameraPan;
     *y = sFieldCameraOffset.yPixelOffset + sVerticalCameraPan + 8;
+#ifdef ROTATE_OVERWORLD_180
+    // Used as the map layers' scroll by battle transitions, so rotate it like FieldUpdateBgTilemapScroll
+    *x = (256 - DISPLAY_WIDTH) - *x;
+    *y = (256 - DISPLAY_HEIGHT) - *y;
+#endif
 }
 
 void DrawWholeMapView(void)
@@ -244,6 +262,24 @@ static void DrawMetatileAt(const struct MapLayout *mapLayout, u16 offset, int x,
 
 static void DrawMetatile(s32 metatileLayerType, const u16 *tiles, u16 offset)
 {
+#ifdef ROTATE_OVERWORLD_180
+    // Draw the metatile rotated 180 degrees: at the mirrored position in the 32x32 tilemap,
+    // with its 2x2 tiles in reverse order and each tile flipped horizontally and vertically.
+    // Every map tile (including door animations) is drawn through here.
+    // Written out rather than as a loop because this runs for every metatile the camera reveals.
+    u16 rotatedTiles[NUM_TILES_PER_METATILE];
+
+    rotatedTiles[0] = tiles[3] ^ TILE_FLIP_180; // Bottom layer
+    rotatedTiles[1] = tiles[2] ^ TILE_FLIP_180;
+    rotatedTiles[2] = tiles[1] ^ TILE_FLIP_180;
+    rotatedTiles[3] = tiles[0] ^ TILE_FLIP_180;
+    rotatedTiles[4] = tiles[7] ^ TILE_FLIP_180; // Top layer
+    rotatedTiles[5] = tiles[6] ^ TILE_FLIP_180;
+    rotatedTiles[6] = tiles[5] ^ TILE_FLIP_180;
+    rotatedTiles[7] = tiles[4] ^ TILE_FLIP_180;
+    tiles = rotatedTiles;
+    offset = (32 * 32 - 1) - (offset + 0x21);
+#endif
     switch (metatileLayerType)
     {
     case METATILE_LAYER_TYPE_SPLIT:
@@ -286,10 +322,10 @@ static void DrawMetatile(s32 metatileLayerType, const u16 *tiles, u16 offset)
         break;
     case METATILE_LAYER_TYPE_NORMAL:
         // Draw garbage to the bottom background layer.
-        gOverworldTilemapBuffer_Bg3[offset] = 0x3014;
-        gOverworldTilemapBuffer_Bg3[offset + 1] = 0x3014;
-        gOverworldTilemapBuffer_Bg3[offset + 0x20] = 0x3014;
-        gOverworldTilemapBuffer_Bg3[offset + 0x21] = 0x3014;
+        gOverworldTilemapBuffer_Bg3[offset] = 0x3014 ^ TILE_FLIP_180;
+        gOverworldTilemapBuffer_Bg3[offset + 1] = 0x3014 ^ TILE_FLIP_180;
+        gOverworldTilemapBuffer_Bg3[offset + 0x20] = 0x3014 ^ TILE_FLIP_180;
+        gOverworldTilemapBuffer_Bg3[offset + 0x21] = 0x3014 ^ TILE_FLIP_180;
 
         // Draw metatile's bottom layer to the middle background layer.
         gOverworldTilemapBuffer_Bg2[offset] = tiles[0];
@@ -460,6 +496,10 @@ void UpdateCameraPanning(void)
     //Update sprite offset of overworld objects
     gSpriteCoordOffsetX = gTotalCameraPixelOffsetX - sHorizontalCameraPan;
     gSpriteCoordOffsetY = gTotalCameraPixelOffsetY - sVerticalCameraPan - 8;
+#ifdef ROTATE_OVERWORLD_180
+    // The next BuildOamBuffer is for the overworld, so it should rotate the map's sprites
+    gRotateOverworldSprites = TRUE;
+#endif
 }
 
 static void CameraPanningCB_PanAhead(void)
