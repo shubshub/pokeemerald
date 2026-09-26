@@ -290,6 +290,12 @@ EWRAM_DATA s16 gSpriteCoordOffsetX = 0;
 EWRAM_DATA s16 gSpriteCoordOffsetY = 0;
 EWRAM_DATA struct OamMatrix gOamMatrices[OAM_MATRIX_COUNT] = {0};
 EWRAM_DATA bool8 gAffineAnimsDisabled = FALSE;
+#ifdef ROTATE_OVERWORLD_180
+// Set by UpdateCameraPanning when the overworld is about to build OAM, cleared by BuildOamBuffer
+EWRAM_DATA bool8 gRotateOverworldSprites = FALSE;
+// OAM matrices used by rotated affine sprites, which get negated in CopyMatricesToOamBuffer
+EWRAM_DATA static u32 sRotatedOamMatrices = 0;
+#endif
 
 void ResetSpriteData(void)
 {
@@ -330,8 +336,14 @@ void BuildOamBuffer(void)
     SortSprites();
     temp = gMain.oamLoadDisabled;
     gMain.oamLoadDisabled = TRUE;
+#ifdef ROTATE_OVERWORLD_180
+    sRotatedOamMatrices = 0;
+#endif
     AddSpritesToOamBuffer();
     CopyMatricesToOamBuffer();
+#ifdef ROTATE_OVERWORLD_180
+    gRotateOverworldSprites = FALSE;
+#endif
     gMain.oamLoadDisabled = temp;
     sShouldProcessSpriteCopyRequests = TRUE;
 }
@@ -469,6 +481,9 @@ void SortSprites(void)
 void CopyMatricesToOamBuffer(void)
 {
     u8 i;
+#ifdef ROTATE_OVERWORLD_180
+    u32 rotatedMatrices;
+#endif
     for (i = 0; i < OAM_MATRIX_COUNT; i++)
     {
         u32 base = 4 * i;
@@ -477,7 +492,64 @@ void CopyMatricesToOamBuffer(void)
         gMain.oamBuffer[base + 2].affineParam = gOamMatrices[i].c;
         gMain.oamBuffer[base + 3].affineParam = gOamMatrices[i].d;
     }
+#ifdef ROTATE_OVERWORLD_180
+    // Rotating an affine sprite 180 degrees is the same as negating its matrix
+    for (i = 0, rotatedMatrices = sRotatedOamMatrices; rotatedMatrices != 0; i++, rotatedMatrices >>= 1)
+    {
+        if (rotatedMatrices & 1)
+        {
+            u32 base = 4 * i;
+            gMain.oamBuffer[base + 0].affineParam = -gOamMatrices[i].a;
+            gMain.oamBuffer[base + 1].affineParam = -gOamMatrices[i].b;
+            gMain.oamBuffer[base + 2].affineParam = -gOamMatrices[i].c;
+            gMain.oamBuffer[base + 3].affineParam = -gOamMatrices[i].d;
+        }
+    }
+#endif
 }
+
+#ifdef ROTATE_OVERWORLD_180
+// Rotates a sprite's OAM entries 180 degrees around the centre of the screen.
+// This runs for every map sprite each frame, so it works on the raw OAM attributes instead of the bitfields:
+// attribute 0 is y (bits 0-7), affine mode (bits 8-9) and shape (bits 14-15),
+// attribute 1 is x (bits 0-8), matrix number or h/v flip (bits 9-13) and size (bits 14-15).
+static void RotateOamEntries180(u8 firstOamIndex, u8 endOamIndex)
+{
+    u16 *attr = (u16 *)&gMain.oamBuffer[firstOamIndex];
+    u16 *end = (u16 *)&gMain.oamBuffer[endOamIndex];
+
+    for (; attr < end; attr += sizeof(struct OamData) / sizeof(u16))
+    {
+        u32 attr0 = attr[0];
+        u32 attr1 = attr[1];
+        const struct OamDimensions *dimensions = &sOamDimensions[attr0 >> 14][attr1 >> 14];
+        u32 width = dimensions->width;
+        u32 height = dimensions->height;
+
+        if (attr0 & (ST_OAM_AFFINE_ON_MASK << 8))
+        {
+            // Affine sprites can't be flipped, so negate their matrix instead (see CopyMatricesToOamBuffer).
+            // The hardware samples them from 1 pixel left of/above their centre, so they also move 1 pixel more.
+            sRotatedOamMatrices |= (u32)1 << ((attr1 >> 9) & 0x1F);
+            if (attr0 & (ST_OAM_AFFINE_DOUBLE_MASK << 8))
+            {
+                width *= 2;
+                height *= 2;
+            }
+            width++;
+            height++;
+        }
+        else
+        {
+            attr1 ^= ST_OAM_MNUM_FLIP_MASK << 9; // Flip horizontally and vertically
+        }
+
+        // Mirror the position. The 9-bit x and 8-bit y wrap around just like the screen does.
+        attr[1] = (attr1 & ~0x1FF) | ((DISPLAY_WIDTH - width - attr1) & 0x1FF);
+        attr[0] = (attr0 & ~0xFF) | ((DISPLAY_HEIGHT - height - attr0) & 0xFF);
+    }
+}
+#endif
 
 void AddSpritesToOamBuffer(void)
 {
@@ -487,8 +559,24 @@ void AddSpritesToOamBuffer(void)
     while (i < MAX_SPRITES)
     {
         struct Sprite *sprite = &gSprites[sSpriteOrder[i]];
+#ifdef ROTATE_OVERWORLD_180
+        if (sprite->inUse && !sprite->invisible)
+        {
+            u8 firstOamIndex = oamIndex;
+            bool8 oamFull = AddSpriteToOamBuffer(sprite, &oamIndex);
+
+            // While the overworld is drawing, rotate its sprites with the map: ones that scroll with the camera,
+            // and ones drawn below the text layer, like weather and the Fly bird. Sprites at priority 0 that
+            // don't scroll are UI shown over text boxes (e.g. menu arrows), so they stay upright.
+            if (gRotateOverworldSprites && (sprite->coordOffsetEnabled || sprite->oam.priority != 0))
+                RotateOamEntries180(firstOamIndex, oamIndex);
+            if (oamFull)
+                return;
+        }
+#else
         if (sprite->inUse && !sprite->invisible && AddSpriteToOamBuffer(sprite, &oamIndex))
             return;
+#endif
         i++;
     }
 

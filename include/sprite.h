@@ -262,6 +262,9 @@ extern s16 gSpriteCoordOffsetX;
 extern s16 gSpriteCoordOffsetY;
 extern struct OamMatrix gOamMatrices[OAM_MATRIX_COUNT];
 extern bool8 gAffineAnimsDisabled;
+#ifdef ROTATE_OVERWORLD_180
+extern bool8 gRotateOverworldSprites;
+#endif
 
 void ResetSpriteData(void);
 void AnimateSprites(void);
